@@ -7,6 +7,8 @@
 #include "gps_pin.h"
 #include <ArduinoJson.h>
 #include <TinyGPS++.h>
+#include "time.h"
+#include "sntp.h"
 
 // Serial Communication for sensor, SIM and GPS
 #ifndef SerialAT
@@ -21,8 +23,20 @@
 #define sensor Serial1
 #endif
 
+// Time libraries
+const char *ntpServer1 = "pool.ntp.org";
+const char *ntpServer2 = "time.nist.gov";
+const long gmtOffset_sec = 10800;
+const int daylightOffset_sec = 3600;
+String year = "";
+String month = "";
+String day = "";
+String date = "";
+String hour = "";
+String minute = "";
 
-const char *server = "45.61.55.203";                  // Replace with your server IP address
+
+const char *server = "45.61.55.203";                 // Replace with your server IP address
 const int serverPort = 9090;                         // Replace with your server port
 const String access_token = "XAjieqa2LNFTIvyasBki";  // Replace with access token
 
@@ -56,6 +70,26 @@ void setup() {
 
   // Connecting to WiFi
   connectToWiFi();
+
+  // set notification call-back function
+  sntp_set_time_sync_notification_cb(timeavailable);
+
+  /**
+   * NTP server address could be aquired via DHCP,
+   *
+   * NOTE: This call should be made BEFORE esp32 aquires IP address via DHCP,
+   * otherwise SNTP option 42 would be rejected by default.
+   * NOTE: configTime() function call if made AFTER DHCP-client run
+   * will OVERRIDE aquired NTP server address
+   */
+  sntp_servermode_dhcp(1);  // (optional)
+
+  /**
+   * This will set configured ntp servers and constant TimeZone/daylightOffset
+   * should be OK if your time zone does not need to adjust daylightOffset twice a year,
+   * in such a case time adjustment won't be handled automagicaly.
+   */
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
 }
 
 void loop() {
@@ -69,20 +103,20 @@ void loop() {
   Serial.print((float)soilTemperature / 10.0);
   Serial.print(" °C    ");
   Serial.print("Soil Conductivity: ");
-  Serial.print((float)soilConductivity/100.0);
+  Serial.print((float)soilConductivity / 100.0);
   Serial.print(" dS/m    ");  // microsiemens per centimeter (µS/cm)
   Serial.print("Soil pH: ");
   Serial.print((float)soilPH / 10.0);
   Serial.print("   ");
   Serial.print("Nitrogen: ");
-  Serial.print(nitrogen);
-  Serial.print(" mg/kg    ");
+  Serial.print(nitrogen * 0.001);
+  Serial.print(" %    ");
   Serial.print("Phosphorus: ");
-  Serial.print(phosphorus);
-  Serial.print(" mg/kg    ");
+  Serial.print(phosphorus * 0.001);
+  Serial.print(" %    ");
   Serial.print("Potassium: ");
-  Serial.print(potassium);
-  Serial.println(" mg/kg");
+  Serial.print(potassium * 0.001);
+  Serial.println(" %");
 
   //Read GPS data
   if (readGPSData(latitude, longitude, altitude)) {
@@ -95,9 +129,13 @@ void loop() {
     Serial.println(altitude, 2);
   }
 
+  // Get date and time of the collected data
+  getFormattedLocalTime(year, month, day, date, hour, minute);
+  Serial.println(year + "," + month + "," + date + "  " + day + " " + hour + ":" + minute + "\n");
+
   // POST the sensor data via HTTP
-  sendSensorDataAttributes(soilTemperature, soilHumidity, soilConductivity, soilPH, nitrogen, phosphorus, potassium, latitude, longitude, altitude);
-  sendSensorDataTelemetry(soilTemperature, soilHumidity, soilConductivity, soilPH, nitrogen, phosphorus, potassium, latitude, longitude, altitude);
+  sendSensorDataAttributes(soilTemperature, soilHumidity, soilConductivity, soilPH, nitrogen, phosphorus, potassium, latitude, longitude, altitude, year, month, day, date, hour, minute);
+  sendSensorDataTelemetry(soilTemperature, soilHumidity, soilConductivity, soilPH, nitrogen, phosphorus, potassium, latitude, longitude, altitude, year, month, day, date, hour, minute);
 
   // delay(10000);  // Delay between readings
 }
@@ -134,20 +172,26 @@ void readSensorData() {
   }
 }
 
-void sendSensorDataAttributes(float SoilTemperature, float SoilHumidity, float SoilConductivity, float SoilPH, float Nitrogen, float Phosphorus, float Potassium, double latitude, double longitude, double altitude) {
+void sendSensorDataAttributes(float SoilTemperature, float SoilHumidity, float SoilConductivity, float SoilPH, float Nitrogen, float Phosphorus, float Potassium, double latitude, double longitude, double altitude, String year, String month, String day, String date, String hour, String minute) {
 
   // Create JSON payload
   StaticJsonDocument<200> jsonDocument;
   jsonDocument["humidity"] = (float)SoilHumidity / 10.0;
   jsonDocument["temperature"] = (float)SoilTemperature / 10.0;
-  jsonDocument["conductivity"] = (float)SoilConductivity/100.0;
+  jsonDocument["conductivity"] = (float)SoilConductivity / 100.0;
   jsonDocument["ph"] = (float)SoilPH / 10.0;
-  jsonDocument["nitrogen"] = Nitrogen;
-  jsonDocument["phosphorus"] = Phosphorus;
-  jsonDocument["potassium"] = Potassium;
+  jsonDocument["nitrogen"] = Nitrogen * 0.001;
+  jsonDocument["phosphorus"] = Phosphorus * 0.001;
+  jsonDocument["potassium"] = Potassium * 0.001;
   jsonDocument["latitude"] = latitude;
   jsonDocument["longitude"] = longitude;
   jsonDocument["altitude"] = altitude;
+  jsonDocument["year"] = year;
+  jsonDocument["month"] = month;
+  jsonDocument["day"] = day;
+  jsonDocument["date"] = date;
+  jsonDocument["hour"] = hour;
+  jsonDocument["minute"] = minute;
 
   String payload;
   serializeJson(jsonDocument, payload);
@@ -176,20 +220,26 @@ void sendSensorDataAttributes(float SoilTemperature, float SoilHumidity, float S
   }
 }
 
-void sendSensorDataTelemetry(float SoilTemperature, float SoilHumidity, float SoilConductivity, float SoilPH, float Nitrogen, float Phosphorus, float Potassium, double latitude, double longitude, double altitude) {
+void sendSensorDataTelemetry(float SoilTemperature, float SoilHumidity, float SoilConductivity, float SoilPH, float Nitrogen, float Phosphorus, float Potassium, double latitude, double longitude, double altitude, String year, String month, String day, String date, String hour, String minute) {
 
   // Create JSON payload
   StaticJsonDocument<200> jsonDocument;
   jsonDocument["humidity"] = (float)SoilHumidity / 10.0;
   jsonDocument["temperature"] = (float)SoilTemperature / 10.0;
-  jsonDocument["conductivity"] = (float)SoilConductivity/100;
+  jsonDocument["conductivity"] = (float)SoilConductivity / 100;
   jsonDocument["ph"] = (float)SoilPH / 10.0;
-  jsonDocument["nitrogen"] = Nitrogen;
-  jsonDocument["phosphorus"] = Phosphorus;
-  jsonDocument["potassium"] = Potassium;
+  jsonDocument["nitrogen"] = Nitrogen * 0.001;
+  jsonDocument["phosphorus"] = Phosphorus * 0.001;
+  jsonDocument["potassium"] = Potassium * 0.001;
   jsonDocument["latitude"] = latitude;
   jsonDocument["longitude"] = longitude;
   jsonDocument["altitude"] = altitude;
+  jsonDocument["year"] = year;
+  jsonDocument["month"] = month;
+  jsonDocument["day"] = day;
+  jsonDocument["date"] = date;
+  jsonDocument["hour"] = hour;
+  jsonDocument["minute"] = minute;
 
   String payload;
   serializeJson(jsonDocument, payload);
@@ -259,4 +309,51 @@ bool readGPSData(double &latitude, double &longitude, double &altitude) {
     }
   }
   return false;  // No valid coordinates or altitude found
+}
+
+
+void getFormattedLocalTime(String &year, String &month, String &dayOfWeek, String &day, String &hour, String &minute) {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    year = month = dayOfWeek = day = hour = minute = "No time available (yet)";
+    return;
+  }
+
+  char yearBuffer[5];        // Buffer for year
+  char monthBuffer[3];       // Buffer for month
+  char dayOfWeekBuffer[10];  // Buffer for day of week
+  char dayBuffer[3];         // Buffer for day
+  char hourBuffer[3];        // Buffer for hour
+  char minuteBuffer[3];      // Buffer for minute
+
+  // Convert numerical values to strings
+  snprintf(yearBuffer, sizeof(yearBuffer), "%d", timeinfo.tm_year + 1900);
+  snprintf(monthBuffer, sizeof(monthBuffer), "%02d", timeinfo.tm_mon + 1);
+  snprintf(dayOfWeekBuffer, sizeof(dayOfWeekBuffer), "%s", getDayOfWeekName(timeinfo.tm_wday));
+  snprintf(dayBuffer, sizeof(dayBuffer), "%02d", timeinfo.tm_mday);
+  snprintf(hourBuffer, sizeof(hourBuffer), "%02d", timeinfo.tm_hour);
+  snprintf(minuteBuffer, sizeof(minuteBuffer), "%02d", timeinfo.tm_min);
+
+  // Assign values to the output variables
+  year = String(yearBuffer);
+  month = String(monthBuffer);
+  dayOfWeek = String(dayOfWeekBuffer);
+  day = String(dayBuffer);
+  hour = String(hourBuffer);
+  minute = String(minuteBuffer);
+}
+
+// Function to get the day of the week name from the day of the week number
+const char *getDayOfWeekName(int dayOfWeek) {
+  const char *dayNames[] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+  if (dayOfWeek >= 0 && dayOfWeek < 7) {
+    return dayNames[dayOfWeek];
+  } else {
+    return "Invalid Day";
+  }
+}
+
+// Callback function (get's called when time adjusts via NTP)
+void timeavailable(struct timeval *t) {
+  Serial.println("Got time adjustment from NTP!");
 }
