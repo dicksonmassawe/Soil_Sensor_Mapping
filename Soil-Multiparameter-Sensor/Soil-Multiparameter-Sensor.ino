@@ -1,7 +1,7 @@
 HardwareSerial sensor(2); // Use Serial2 for ESP32 (pins 16 - RX, 17 - TX)
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   sensor.begin(4800, SERIAL_8N1, 33, 32); // Start hardware serial at 4800 bps
 }
 
@@ -20,9 +20,9 @@ void loop() {
     unsigned int soilTemperature = (receivedData[5] << 8) | receivedData[6];
     unsigned int soilConductivity = (receivedData[7] << 8) | receivedData[8];
     unsigned int soilPH = (receivedData[9] << 8) | receivedData[10];
-    unsigned int nitrogen = (receivedData[11] << 8) | receivedData[12];
+    float nitrogen = (receivedData[11] << 8) | receivedData[12];
     unsigned int phosphorus = (receivedData[13] << 8) | receivedData[14];
-    unsigned int potassium = (receivedData[15] << 8) | receivedData[16];
+    float potassium = (receivedData[15] << 8) | receivedData[16];
 
     Serial.print("Soil Humidity: ");
     Serial.print((float)soilHumidity / 10.0);
@@ -37,13 +37,13 @@ void loop() {
     Serial.print((float)soilPH / 10.0);
     Serial.print("   ");
     Serial.print("Nitrogen: ");
-    Serial.print(nitrogen);
-    Serial.print(" mg/kg    ");
+    Serial.print(nitrogen/10000);
+    Serial.print(" %    ");
     Serial.print("Phosphorus: ");
     Serial.print(phosphorus);
     Serial.print(" mg/kg    ");
     Serial.print("Potassium: ");
-    Serial.print(potassium);
-    Serial.println(" mg/kg \n");
+    Serial.print(potassium/390);
+    Serial.println(" cmol(+)/kg \n");
   }
 }

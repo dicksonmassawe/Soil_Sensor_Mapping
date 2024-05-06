@@ -26,7 +26,7 @@
 // Time libraries
 const char *ntpServer1 = "pool.ntp.org";
 const char *ntpServer2 = "time.nist.gov";
-const long gmtOffset_sec = 10800;
+const long gmtOffset_sec = 7200;
 const int daylightOffset_sec = 3600;
 String year = "";
 String month = "";
@@ -34,6 +34,7 @@ String day = "";
 String date = "";
 String hour = "";
 String minute = "";
+String second = "";
 
 
 const char *server = "45.61.55.203";                 // Replace with your server IP address
@@ -46,9 +47,9 @@ unsigned int soilHumidity = 0;
 unsigned int soilTemperature = 0;
 unsigned int soilConductivity = 0;
 unsigned int soilPH = 0;
-unsigned int nitrogen = 0;
+float nitrogen = 0;
 unsigned int phosphorus = 0;
-unsigned int potassium = 0;
+float potassium = 0;
 
 TinyGPSPlus gps;
 
@@ -57,16 +58,37 @@ double latitude = 0.0;
 double longitude = 0.0;
 double altitude = 0.0;
 
+// LED and  Buzzer
+#define white1 34
+#define white2 35
+#define red 25
+#define blue 13
+#define green 2
+#define buzzer 14
+
+
 void setup() {
   Serial.begin(115200);
   while (!Serial)
     ;
 
   // Initializing sensor
-  sensor.begin(4800, SERIAL_8N1, 32, 33);  // Start hardware serial at 4800 bps
+  sensor.begin(4800, SERIAL_8N1, 33, 32);  // Start hardware serial at 4800 bps
 
-  //Initializing GPS
-  initializeGPS();
+  // LED and Buzzer
+  pinMode(white1, OUTPUT);
+  pinMode(white2, OUTPUT);
+  pinMode(red, OUTPUT);
+  pinMode(blue, OUTPUT);
+  pinMode(green, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+
+  digitalWrite(white1, 1);
+  digitalWrite(white2, 1);
+  digitalWrite(red, 0);
+  digitalWrite(blue, 0);
+  digitalWrite(green, 0);
+  digitalWrite(buzzer, 0);
 
   // Connecting to WiFi
   connectToWiFi();
@@ -90,6 +112,9 @@ void setup() {
    * in such a case time adjustment won't be handled automagicaly.
    */
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
+
+  //Initializing GPS
+  initializeGPS();
 }
 
 void loop() {
@@ -103,8 +128,8 @@ void loop() {
   Serial.print((float)soilTemperature / 10.0);
   Serial.print(" °C    ");
   Serial.print("Soil Conductivity: ");
-  Serial.print((float)soilConductivity / 100.0);
-  Serial.print(" dS/m    ");  // microsiemens per centimeter (µS/cm)
+  Serial.print((float)soilConductivity);
+  Serial.print(" uS/m    ");  // microsiemens per centimeter (µS/cm)
   Serial.print("Soil pH: ");
   Serial.print((float)soilPH / 10.0);
   Serial.print("   ");
@@ -112,11 +137,11 @@ void loop() {
   Serial.print(nitrogen * 0.001);
   Serial.print(" %    ");
   Serial.print("Phosphorus: ");
-  Serial.print(phosphorus * 0.001);
-  Serial.print(" %    ");
+  Serial.print(phosphorus);
+  Serial.print(" mg/kg    ");
   Serial.print("Potassium: ");
-  Serial.print(potassium * 0.001);
-  Serial.println(" %");
+  Serial.print(potassium / 390);
+  Serial.println(" cmol(+)/kg");
 
   //Read GPS data
   if (readGPSData(latitude, longitude, altitude)) {
@@ -129,13 +154,14 @@ void loop() {
     Serial.println(altitude, 2);
   }
 
+
   // Get date and time of the collected data
-  getFormattedLocalTime(year, month, day, date, hour, minute);
-  Serial.println(year + "," + month + "," + date + "  " + day + " " + hour + ":" + minute + "\n");
+  getFormattedLocalTime(year, month, day, date, hour, minute, second);
+  Serial.println(year + "," + month + "," + date + "  " + day + " " + hour + ":" + minute + ":" + second + "\n");
 
   // POST the sensor data via HTTP
-  sendSensorDataAttributes(soilTemperature, soilHumidity, soilConductivity, soilPH, nitrogen, phosphorus, potassium, latitude, longitude, altitude, year, month, day, date, hour, minute);
-  sendSensorDataTelemetry(soilTemperature, soilHumidity, soilConductivity, soilPH, nitrogen, phosphorus, potassium, latitude, longitude, altitude, year, month, day, date, hour, minute);
+  sendSensorDataAttributes(soilTemperature, soilHumidity, soilConductivity, soilPH, nitrogen, phosphorus, potassium, latitude, longitude, altitude, year, month, day, date, hour, minute, second);
+  sendSensorDataTelemetry(soilTemperature, soilHumidity, soilConductivity, soilPH, nitrogen, phosphorus, potassium, latitude, longitude, altitude, year, month, day, date, hour, minute, second);
 
   // delay(10000);  // Delay between readings
 }
@@ -146,9 +172,13 @@ void connectToWiFi() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
     Serial.println("Connecting to WiFi...");
+    digitalWrite(blue, HIGH);
+    delay(1000);
+    digitalWrite(blue, LOW);
   }
 
   Serial.println("Connected to WiFi");
+  // buzzerSuccess(blue);
 }
 
 void readSensorData() {
@@ -172,17 +202,17 @@ void readSensorData() {
   }
 }
 
-void sendSensorDataAttributes(float SoilTemperature, float SoilHumidity, float SoilConductivity, float SoilPH, float Nitrogen, float Phosphorus, float Potassium, double latitude, double longitude, double altitude, String year, String month, String day, String date, String hour, String minute) {
+void sendSensorDataAttributes(float SoilTemperature, float SoilHumidity, float SoilConductivity, float SoilPH, float Nitrogen, float Phosphorus, float Potassium, double latitude, double longitude, double altitude, String year, String month, String day, String date, String hour, String minute, String second) {
 
   // Create JSON payload
   StaticJsonDocument<200> jsonDocument;
   jsonDocument["humidity"] = (float)SoilHumidity / 10.0;
   jsonDocument["temperature"] = (float)SoilTemperature / 10.0;
-  jsonDocument["conductivity"] = (float)SoilConductivity / 100.0;
+  jsonDocument["conductivity"] = (float)SoilConductivity;
   jsonDocument["ph"] = (float)SoilPH / 10.0;
   jsonDocument["nitrogen"] = Nitrogen * 0.001;
-  jsonDocument["phosphorus"] = Phosphorus * 0.001;
-  jsonDocument["potassium"] = Potassium * 0.001;
+  jsonDocument["phosphorus"] = Phosphorus;
+  jsonDocument["potassium"] = Potassium / 390;
   jsonDocument["latitude"] = latitude;
   jsonDocument["longitude"] = longitude;
   jsonDocument["altitude"] = altitude;
@@ -192,6 +222,7 @@ void sendSensorDataAttributes(float SoilTemperature, float SoilHumidity, float S
   jsonDocument["date"] = date;
   jsonDocument["hour"] = hour;
   jsonDocument["minute"] = minute;
+  jsonDocument["second"] = second;
 
   String payload;
   serializeJson(jsonDocument, payload);
@@ -209,28 +240,32 @@ void sendSensorDataAttributes(float SoilTemperature, float SoilHumidity, float S
       Serial.println("Attribute POST request sent successfully");
       Serial.print("Server response: ");
       Serial.println(httpResponseCode);
+      // buzzerSuccess(green);
     } else {
       Serial.print("Error on sending Attribute POST request: ");
       Serial.println(httpResponseCode);
+      // buzzerError(red);
     }
 
     http.end();
   } else {
     Serial.println("WiFi Disconnected \n");
+    // Connecting to WiFi
+    connectToWiFi();
   }
 }
 
-void sendSensorDataTelemetry(float SoilTemperature, float SoilHumidity, float SoilConductivity, float SoilPH, float Nitrogen, float Phosphorus, float Potassium, double latitude, double longitude, double altitude, String year, String month, String day, String date, String hour, String minute) {
+void sendSensorDataTelemetry(float SoilTemperature, float SoilHumidity, float SoilConductivity, float SoilPH, float Nitrogen, float Phosphorus, float Potassium, double latitude, double longitude, double altitude, String year, String month, String day, String date, String hour, String minute, String second) {
 
   // Create JSON payload
   StaticJsonDocument<200> jsonDocument;
   jsonDocument["humidity"] = (float)SoilHumidity / 10.0;
   jsonDocument["temperature"] = (float)SoilTemperature / 10.0;
-  jsonDocument["conductivity"] = (float)SoilConductivity / 100;
+  jsonDocument["conductivity"] = (float)SoilConductivity;
   jsonDocument["ph"] = (float)SoilPH / 10.0;
   jsonDocument["nitrogen"] = Nitrogen * 0.001;
-  jsonDocument["phosphorus"] = Phosphorus * 0.001;
-  jsonDocument["potassium"] = Potassium * 0.001;
+  jsonDocument["phosphorus"] = Phosphorus;
+  jsonDocument["potassium"] = Potassium / 390;
   jsonDocument["latitude"] = latitude;
   jsonDocument["longitude"] = longitude;
   jsonDocument["altitude"] = altitude;
@@ -240,6 +275,7 @@ void sendSensorDataTelemetry(float SoilTemperature, float SoilHumidity, float So
   jsonDocument["date"] = date;
   jsonDocument["hour"] = hour;
   jsonDocument["minute"] = minute;
+  jsonDocument["second"] = second;
 
   String payload;
   serializeJson(jsonDocument, payload);
@@ -258,41 +294,61 @@ void sendSensorDataTelemetry(float SoilTemperature, float SoilHumidity, float So
       Serial.print("Server response: ");
       Serial.println(httpResponseCode);
       Serial.println("");
+      // buzzerSuccess(green);
     } else {
       Serial.print("Error on sending Telemetry POST request: ");
       Serial.println(httpResponseCode);
       Serial.println("");
+      // buzzerError(red);
     }
 
     http.end();
   } else {
     Serial.println("WiFi Disconnected \n");
+    // Connecting to WiFi
+    connectToWiFi();
   }
 }
 
 void initializeGPS() {
-  // Initialization code for pins and serial ports
-  pinMode(BOARD_POWER_ON_PIN, OUTPUT);
-  digitalWrite(BOARD_POWER_ON_PIN, HIGH);
+  bool gpsInitialized = false;
 
-  pinMode(BOARD_RST_PIN, OUTPUT);
-  digitalWrite(BOARD_RST_PIN, LOW);
+  while (!gpsInitialized) {
+    // Initialization code for pins and serial ports
+    pinMode(BOARD_POWER_ON_PIN, OUTPUT);
+    digitalWrite(BOARD_POWER_ON_PIN, HIGH);
 
-  pinMode(BOARD_MODEM_PWR_PIN, OUTPUT);
-  digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
-  delay(100);
-  digitalWrite(BOARD_MODEM_PWR_PIN, HIGH);
-  delay(1000);
-  digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
+    pinMode(BOARD_RST_PIN, OUTPUT);
+    digitalWrite(BOARD_RST_PIN, LOW);
 
-  // Modem Serial port
-  SerialAT.begin(115200, SERIAL_8N1, BOARD_MODEM_RX_PIN, BOARD_MODEM_TX_PIN);
-  // GPS Serial port
-  SerialGPS.begin(9600, SERIAL_8N1, BOARD_GPS_RX_PIN, BOARD_GPS_TX_PIN);
+    pinMode(BOARD_MODEM_PWR_PIN, OUTPUT);
+    digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
+    delay(100);
+    digitalWrite(BOARD_MODEM_PWR_PIN, HIGH);
+    delay(1000);
+    digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
 
-  Serial.println("Initializing GPS...");
-  delay(2000);
+    // Modem Serial port
+    SerialAT.begin(115200, SERIAL_8N1, BOARD_MODEM_RX_PIN, BOARD_MODEM_TX_PIN);
+
+    // GPS Serial port
+    SerialGPS.begin(9600, SERIAL_8N1, BOARD_GPS_RX_PIN, BOARD_GPS_TX_PIN);
+
+    Serial.println("Initializing GPS...");
+    delay(2000);
+
+    // Check if GPS is initialized
+    if (SerialGPS.available()) {
+      gpsInitialized = true;
+      Serial.println("GPS Initialized successfully.");
+      // buzzerSuccess(white2);
+    } else {
+      Serial.println("Failed to initialize GPS. Retrying...");
+      // buzzerError(white2);
+    }
+  }
 }
+
 
 bool readGPSData(double &latitude, double &longitude, double &altitude) {
   while (SerialGPS.available()) {
@@ -312,10 +368,11 @@ bool readGPSData(double &latitude, double &longitude, double &altitude) {
 }
 
 
-void getFormattedLocalTime(String &year, String &month, String &dayOfWeek, String &day, String &hour, String &minute) {
+void getFormattedLocalTime(String &year, String &month, String &dayOfWeek, String &day, String &hour, String &minute, String &second) {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    year = month = dayOfWeek = day = hour = minute = "No time available (yet)";
+    year = month = dayOfWeek = day = hour = minute = second = "No time available (yet)";
+    // buzzerError(white1);
     return;
   }
 
@@ -325,6 +382,7 @@ void getFormattedLocalTime(String &year, String &month, String &dayOfWeek, Strin
   char dayBuffer[3];         // Buffer for day
   char hourBuffer[3];        // Buffer for hour
   char minuteBuffer[3];      // Buffer for minute
+  char secondBuffer[3];      // Buffer for second
 
   // Convert numerical values to strings
   snprintf(yearBuffer, sizeof(yearBuffer), "%d", timeinfo.tm_year + 1900);
@@ -333,6 +391,7 @@ void getFormattedLocalTime(String &year, String &month, String &dayOfWeek, Strin
   snprintf(dayBuffer, sizeof(dayBuffer), "%02d", timeinfo.tm_mday);
   snprintf(hourBuffer, sizeof(hourBuffer), "%02d", timeinfo.tm_hour);
   snprintf(minuteBuffer, sizeof(minuteBuffer), "%02d", timeinfo.tm_min);
+  snprintf(secondBuffer, sizeof(secondBuffer), "%02d", timeinfo.tm_sec);
 
   // Assign values to the output variables
   year = String(yearBuffer);
@@ -341,6 +400,7 @@ void getFormattedLocalTime(String &year, String &month, String &dayOfWeek, Strin
   day = String(dayBuffer);
   hour = String(hourBuffer);
   minute = String(minuteBuffer);
+  second = String(secondBuffer);
 }
 
 // Function to get the day of the week name from the day of the week number
@@ -356,4 +416,27 @@ const char *getDayOfWeekName(int dayOfWeek) {
 // Callback function (get's called when time adjusts via NTP)
 void timeavailable(struct timeval *t) {
   Serial.println("Got time adjustment from NTP!");
+  // buzzerSuccess(white1);
 }
+
+// void buzzerError(int led) {
+//   for (int i = 0; i < 10; ++i) {
+//     digitalWrite(buzzer, HIGH);
+//     digitalWrite(led, HIGH);
+//     delay(50);
+//     digitalWrite(buzzer, LOW);
+//     delay(50);
+//   }
+//   digitalWrite(led, LOW);
+// }
+
+// void buzzerSuccess(int led) {
+//   for (int i = 0; i < 3; ++i) {
+//     digitalWrite(buzzer, HIGH);
+//     digitalWrite(led, HIGH);
+//     delay(500);
+//     digitalWrite(buzzer, LOW);
+//     delay(500);
+//   }
+//   digitalWrite(led, LOW);
+// }
